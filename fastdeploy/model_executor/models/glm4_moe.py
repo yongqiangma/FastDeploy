@@ -111,9 +111,11 @@ class Glm4MoeMLP(nn.Layer):
 
     def forward(self, x, forward_meta=None):
         """ """
+        paddle.device.nvtx.range_push("Glm4MoeMLP")
         gate_up_out = self.up_gate_proj(x)
         act_out = self.act_fn(gate_up_out)
         down_out = self.down_proj(act_out)
+        paddle.device.nvtx.range_pop()
         return down_out
 
 
@@ -195,12 +197,14 @@ class Glm4Moe(nn.Layer):
             )
 
     def forward(self, x, forward_meta: ForwardMeta = None):
+        paddle.device.nvtx.range_push("Glm4Moe")
         out = self.experts(x, self.gate, forward_meta)
         if self.n_shared_experts > 0:
             out = out + self.shared_experts(x)
         if self.merge_ffn_tp:
             # Both branches produced partial sums; combine first, then single all-reduce.
             out = tensor_model_parallel_all_reduce(out, self.tp_group)
+        paddle.device.nvtx.range_pop()
         return out
 
 
@@ -286,6 +290,7 @@ class Glm4MoeDecoderLayer(nn.Layer):
         super().__init__()
 
         layer_id = int(prefix.split(sep=".")[-1])
+        self.layer_id_log = layer_id
         self.self_attn = Glm4MoeAttention(
             fd_config=fd_config,
             layer_id=layer_id,
@@ -328,21 +333,24 @@ class Glm4MoeDecoderLayer(nn.Layer):
     ):
         """ """
         proxy_rmsnorm = rms_norm_func if fastdeploy.envs.FD_USE_PHI_RMSNORM else None
-
+        paddle.device.nvtx.range_push("Glm4MoeDecoderLayer--" + str(self.layer_id_log))
         hidden_states, residual = self.input_layernorm(
             hidden_states, residual_input=residual, forward_meta=forward_meta, proxy_rmsnorm=proxy_rmsnorm
         )
-
+        paddle.device.nvtx.range_push("Glm4MoeDecoderLayer-Atten")
         hidden_states = self.self_attn(
             hidden_states=hidden_states,
             forward_meta=forward_meta,
         )
-
+        paddle.device.nvtx.range_pop()
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(hidden_states, residual, proxy_rmsnorm=proxy_rmsnorm)
 
+        paddle.device.nvtx.range_push("Glm4MoeDecoderLayer-mlp")
         hidden_states = self.mlp(hidden_states, forward_meta)
 
+        paddle.device.nvtx.range_pop()
+        paddle.device.nvtx.range_pop()
         return hidden_states, residual
 
 

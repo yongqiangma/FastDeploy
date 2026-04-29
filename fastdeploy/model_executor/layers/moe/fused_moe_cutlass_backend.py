@@ -320,11 +320,14 @@ class CutlassMoEMethod(UnquantizedFusedMoEMethod):
         """
         Paddle Cutlass compute Fused MoE.
         """
+        print("apply_tp_apply_tp", flush=True)
         gate_out = gate(x)
         gate_out = gate_out.cast("float32")
 
         if fc1_latent_proj is not None:
             x = fc1_latent_proj(x)
+        
+        paddle.device.nvtx.range_push("get_moe_scores")
 
         if fastdeploy.envs.FD_USE_PHI_MOE_PERMUTE and self.moe_quant_type == "w16a16":
             if layer.topk_method == "noaux_tc":
@@ -337,6 +340,7 @@ class CutlassMoEMethod(UnquantizedFusedMoEMethod):
                     layer.gate_correction_bias,
                     getattr(layer, "renormalize", True),
                 )
+                paddle.device.nvtx.range_pop()
             else:
                 topk_idx, topk_weights = fastdeploy.model_executor.ops.gpu.moe_topk_select(
                     gate_out,
@@ -465,7 +469,8 @@ class CutlassMoEMethod(UnquantizedFusedMoEMethod):
             dequant_scale,
             max_tokens_per_expert,
         )
-
+        paddle.device.nvtx.range_pop()
+        paddle.device.nvtx.range_push("moe_expert_reduce")
         # reduce 中会做 topk 个 weight 的 norm 和 routed_scaling_factor
         fused_moe_out = moe_expert_reduce(
             ffn_out,
@@ -476,9 +481,11 @@ class CutlassMoEMethod(UnquantizedFusedMoEMethod):
             norm_topk_prob=False if layer.topk_method == "noaux_tc" else True,
             routed_scaling_factor=1.0,
         )
-
+        paddle.device.nvtx.range_pop()
+        paddle.device.nvtx.range_push("fc2_latent_proj")
         if fc2_latent_proj is not None:
             fused_moe_out = fc2_latent_proj(fused_moe_out)
+        paddle.device.nvtx.range_pop()
 
         return fused_moe_out
 

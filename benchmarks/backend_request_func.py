@@ -635,6 +635,21 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                         prompt_token_ids = tokenizer.convert_tokens_to_ids(tokenizer.tokenize(user_prompt))
                         input_ids_all.extend(prompt_token_ids)
                         round_input.prompt_token_ids = input_ids_all
+                # 打印每轮拼接结果
+                print(f"=== [Multi-Turn] session={request_func_input.no} round={prompt_no} ===", flush=True)
+                if use_token_ids:
+                    print(f"  input_ids_all length: {len(input_ids_all)}", flush=True)
+                    print(f"  output_ids length: {len(output_ids)}", flush=True)
+                    print(f"  input_ids_all (last 20): {input_ids_all[-20:]}", flush=True)
+                else:
+                    print(f"  history length: {len(history)} messages", flush=True)
+                    for idx, msg in enumerate(history):
+                        role = msg.get('role', '?')
+                        content = msg.get('content', '')
+                        preview = (content[:100] + '...') if len(str(content)) > 100 else content
+                        print(f"  [{idx}] role={role}, content={preview}", flush=True)
+                print(f"=== end round info ===", flush=True)
+
                 # 复用 session
                 s0 = time.perf_counter()
                 output = await async_request_eb_openai_chat_completions(
@@ -646,6 +661,16 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                 llm_time += s1 - s0
 
                 outputs.append(output)
+
+                # 打印每轮输出结果
+                generated_preview = (output.generated_text[:150] + '...') if len(str(output.generated_text)) > 150 else output.generated_text
+                print(f"--- [Multi-Turn] session={request_func_input.no} round={prompt_no} result ---", flush=True)
+                print(f"  success={output.success}, prompt_tokens={output.prompt_tokens}, output_tokens={output.output_tokens}", flush=True)
+                print(f"  latency={s1 - s0:.3f}s, ttft={output.ttft:.4f}s", flush=True)
+                print(f"  generated_text={generated_preview}", flush=True)
+                if use_token_ids and output.output_ids:
+                    print(f"  output_ids length={len(output.output_ids)}, last 10={output.output_ids[-10:]}", flush=True)
+                print(f"--- end round result ---", flush=True)
 
                 if not output.success:
                     session_end = time.perf_counter()
@@ -751,6 +776,22 @@ async def async_request_eb_openai_chat_completions_multi_turn(
 
                         round_input.history_QA = history
 
+                        # 打印tool_call轮拼接后的LLM输入
+                        print(f"=== [Tool-Call] session={request_func_input.no} round={prompt_no} tool_call#{tool_call_count} ===", flush=True)
+                        print(f"  tool_name={tool_name}, tool_id={tool_id}", flush=True)
+                        tool_result_preview = str(tool_result)
+                        tool_result_preview = (tool_result_preview[:200] + '...') if len(tool_result_preview) > 200 else tool_result_preview
+                        print(f"  tool_result={tool_result_preview}", flush=True)
+                        print(f"  history length: {len(history)} messages", flush=True)
+                        for hidx, msg in enumerate(history):
+                            role = msg.get('role', '?')
+                            content = msg.get('content', '')
+                            tc = msg.get('tool_calls', None)
+                            preview = (str(content)[:100] + '...') if len(str(content)) > 100 else content
+                            extra = f", tool_calls={len(tc)} items" if tc else ""
+                            print(f"  [{hidx}] role={role}{extra}, content={preview}", flush=True)
+                        print(f"=== end tool-call round info ===", flush=True)
+
                         s0 = time.perf_counter()
                         output = await async_request_eb_openai_chat_completions(
                             round_input,
@@ -761,6 +802,16 @@ async def async_request_eb_openai_chat_completions_multi_turn(
                         llm_time += s1 - s0
 
                         outputs.append(output)
+
+                        # 打印tool_call轮LLM输出结果
+                        tc_gen_preview = (str(output.generated_text)[:150] + '...') if len(str(output.generated_text)) > 150 else output.generated_text
+                        print(f"--- [Tool-Call] session={request_func_input.no} round={prompt_no} tool_call#{tool_call_count} result ---", flush=True)
+                        print(f"  success={output.success}, prompt_tokens={output.prompt_tokens}, output_tokens={output.output_tokens}", flush=True)
+                        print(f"  latency={s1 - s0:.3f}s, ttft={output.ttft:.4f}s", flush=True)
+                        print(f"  generated_text={tc_gen_preview}", flush=True)
+                        has_next_tc = bool(getattr(output, 'tool_calls', None))
+                        print(f"  has_tool_calls={has_next_tc}", flush=True)
+                        print(f"--- end tool-call result ---", flush=True)
 
                         if not output.success:
                             session_end = time.perf_counter()

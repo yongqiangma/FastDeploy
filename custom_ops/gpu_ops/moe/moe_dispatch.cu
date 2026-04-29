@@ -212,7 +212,11 @@ void MoeDispatchKernel(
               moe_topk * num_rows,
               false,
               stream);
-
+  compute_total_rows_before_expert(expert_idx_per_token->data<int32_t>(),
+                                   moe_topk * num_rows,
+                                   expert_num,
+                                   tokens_expert_prefix_sum->data<int64_t>(),
+                                   stream);
   if (w4a8_in_scale) {
     if (permute_input->dtype() == paddle::DataType::INT8) {
       initialize_moe_routing_kernelLauncher(
@@ -275,11 +279,7 @@ void MoeDispatchKernel(
     }
   }
 
-  compute_total_rows_before_expert(expert_idx_per_token->data<int32_t>(),
-                                   moe_topk * num_rows,
-                                   expert_num,
-                                   tokens_expert_prefix_sum->data<int64_t>(),
-                                   stream);
+
 
   // Only compute max_tokens_per_expert for w4afp8 quantization type
   if (moe_quant_type == "w4afp8") {
